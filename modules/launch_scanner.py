@@ -543,3 +543,67 @@ class LaunchPointScanner:
             }
         finally:
             conn.close()
+
+    def run_scan_for_date(self, target_date, top_n=200):
+        """对指定历史日期执行扫描（回测用）"""
+        conn = self._get_conn()
+        try:
+            # 获取该日期之前120个交易日
+            all_dates = self.get_date_range(conn, target_date, 120)
+            if not all_dates or target_date not in all_dates:
+                return {'error': f'日期 {target_date} 不在交易日内或无数据'}
+
+            # 阶段1: 学习大涨股
+            winners, _ = self.find_winner_samples(conn, target_date, all_dates)
+            winner_count = len(winners)
+            df_w = self.extract_winner_features(conn, winners['code'].tolist(), all_dates, target_date)
+            df_w = df_w.dropna(subset=['kdj_k', 'rsi14', 'dev_ma60', 'dd_60', 'boll_pos'])
+
+            # 阶段2: 加载该日期数据
+            df_today = self.load_today_data(conn, target_date)
+            df_hist = self.load_historical_data(conn, (all_dates[0], target_date))
+            features = self.calc_derived_features(df_hist)
+
+            # 阶段3: 合并计算
+            df = df_today.merge(features, on='code', how='inner')
+            df['dev_ma60'] = np.where(
+                (df['ma60'].notna()) & (df['ma60'] > 0),
+                (df['close'] - df['ma60']) / df['ma60'] * 100, np.nan)
+            df['dev_ma20'] = np.where(
+                (df['ma20'].notna()) & (df['ma20'] > 0),
+                (df['close'] - df['ma20']) / df['ma20'] * 100, np.nan)
+            df['boll_pos'] = np.where(
+                (df['boll_upper'].notna()) & (df['boll_lower'].notna()) & (df['boll_upper'] > df['boll_lower']),
+                (df['close'] - df['boll_lower']) / (df['boll_upper'] - df['boll_lower']), np.nan)
+            df = df.dropna(subset=['kdj_k', 'rsi14', 'dev_ma60', 'dd_60', 'boll_pos', 'down_days'])
+
+            # 阶段4: 筛选评分
+            df_filtered, filter_stats = self.apply_hard_filters(df)
+
+            scores = []
+            breakdowns = []
+            for _, row in df_filtered.iterrows():
+                s, bd = self.calc_score_with_breakdown(row)
+                scores.append(s)
+                breakdowns.append(bd)
+
+            df_filtered['score'] = scores
+            df_filtered['score_breakdown'] = breakdowns
+            df_top = df_filtered.nlargest(top_n, 'score')
+
+            # 阶段5: 保存 — 使用目标日期作为 scan_date
+            scan_date_str = target_date  # 回测时 scan_date = 实际交易日
+            scan_id = self.save_scan_results(
+                conn, scan_date_str, df_top,
+                self.compute_winner_statistics(df_w) if not df_w.empty else {},
+                filter_stats, winner_count, target_date)
+
+            return {
+                'scan_id': scan_id,
+                'scan_date': scan_date_str,
+                'candidates_count': len(df_top),
+                'total_scanned': filter_stats['total'],
+                'winner_count': winner_count,
+            }
+        finally:
+            conn.close()

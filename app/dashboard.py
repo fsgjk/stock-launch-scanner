@@ -382,7 +382,7 @@ df_table = pd.DataFrame(table_data)
 
 # --- 构建 display DataFrame（去掉内部列） ---
 display_cols = ['代码', '名称', '收盘', '涨跌', '得分', '持仓天数',
-                'KDJ_K', 'RSI14', '连跌', '60日回撤', 'MA60偏离', '量比']
+                '连跌', '60日回撤', 'MA60偏离', '量比']
 # 加上累计涨跌幅列
 cum_cols = [f'累计_{td}' for td in track_dates]
 display_cols += cum_cols
@@ -464,8 +464,6 @@ def style_vol(val):
 styled = df_display.style
 styled = styled.map(style_score, subset=['得分'])
 styled = styled.map(style_pct, subset=['涨跌'])
-styled = styled.map(style_kdj, subset=['KDJ_K'])
-styled = styled.map(style_kdj, subset=['RSI14'])
 styled = styled.map(style_days, subset=['连跌'])
 styled = styled.map(style_dd, subset=['60日回撤'])
 styled = styled.map(style_dev, subset=['MA60偏离'])
@@ -475,7 +473,7 @@ for cc in cum_cols:
     styled = styled.map(lambda v: style_pct(v, True), subset=[cc])
 
 # 格式化
-fmt = {'收盘': '{:.2f}', '涨跌': '{:+.2f}%', 'KDJ_K': '{:.1f}', 'RSI14': '{:.1f}',
+fmt = {'收盘': '{:.2f}', '涨跌': '{:+.2f}%',
        '60日回撤': '{:+.1f}%', 'MA60偏离': '{:+.1f}%', '量比': '{:.2f}'}
 for cc in cum_cols:
     fmt[cc] = lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-'
@@ -488,7 +486,7 @@ st.caption(f"📊 跟踪日期: {', '.join(track_dates) if track_dates else '暂
 # 使用 selectbox 做股票选择 + 下方展示K线
 # 按得分排序的选项
 view_opts = [f"⭐{c['score']:2d} | {c['code']} {names.get(c['code'], '')} | ¥{c['close']:.2f} | "
-             f"KDJ_K:{c['kdj_k']:.1f} RSI:{c['rsi14']:.1f} 连跌{c['down_days']}天" 
+             f"连跌{c['down_days']}天 回撤{c['dd_60']:.1f}%" 
              for c in candidates]
 view_codes = [c['code'] for c in candidates]
 

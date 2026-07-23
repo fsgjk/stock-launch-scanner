@@ -1,0 +1,36 @@
+# 数据库文件（太大）
+data/*.db
+data/*.db-journal
+data/*.db-wal
+
+# 日志
+logs/
+*.log
+
+# 输出文件
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Streamlit
+.streamlit/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 临时文件
+tmp/
+*.tmp
+
+# 系统文件
+.DS_Store
+Thumbs.db
+data/chart_*.html

@@ -210,10 +210,10 @@ if selected_id:
         # ===== 核心表格 =====
         st.subheader("📋 股票列表 & 累计涨跌幅跟踪")
 
-        # 构建表头
-        columns = ['代码', '名称', '当日收盘', '得分', '持仓天数']
-        for td in track_dates:
-            columns.append(td)
+        # 构建表头：基本信息 + 技术指标 + 评分明细 + 累计涨跌幅
+        base_columns = ['代码', '名称', '当日收盘', '当日涨跌', '得分', '评分明细', '持仓天数']
+        metric_columns = ['KDJ_K', 'RSI14', '连跌天', '60日回撤', 'MA60偏离', '量比']
+        all_static_cols = base_columns + metric_columns
 
         table_data = []
         for c in candidates:
@@ -221,12 +221,27 @@ if selected_id:
             name = names.get(code, '')
             tk = tracking.get(code, {})
 
+            # 解析评分明细
+            try:
+                bd = json.loads(c.get('score_breakdown', '{}'))
+                bd_str = '|'.join([f"{k}:{v}" for k, v in bd.items()])
+            except:
+                bd_str = ''
+
             row = {
                 '代码': code,
                 '名称': name,
-                '当日收盘': c['close'],
+                '当日收盘': f"{c['close']:.2f}",
+                '当日涨跌': f"{c['pct_change']:+.2f}%" if c.get('pct_change') is not None else '-',
                 '得分': c['score'],
+                '评分明细': bd_str,
                 '持仓天数': tk.get('days', 0) if tk else 0,
+                'KDJ_K': f"{c['kdj_k']:.1f}" if c.get('kdj_k') is not None else '-',
+                'RSI14': f"{c['rsi14']:.1f}" if c.get('rsi14') is not None else '-',
+                '连跌天': int(c['down_days']) if c.get('down_days') is not None else 0,
+                '60日回撤': f"{c['dd_60']:+.1f}%" if c.get('dd_60') is not None else '-',
+                'MA60偏离': f"{c['dev_ma60']:+.1f}%" if c.get('dev_ma60') is not None else '-',
+                '量比': f"{c['volume_ratio']:.2f}" if c.get('volume_ratio') is not None else '-',
             }
 
             for td in track_dates:
@@ -244,40 +259,110 @@ if selected_id:
         def color_score(val):
             try:
                 v = int(val)
-                if v >= 24: return 'color: #D32F2F; font-weight: bold'
+                if v >= 24: return 'color: #D32F2F; font-weight: bold; font-size: 14px'
                 elif v >= 20: return 'color: #FF5722; font-weight: bold'
                 elif v >= 16: return 'color: #FF9800; font-weight: bold'
                 return 'color: #FFC107'
             except: return ''
 
+        def color_pct_change(val):
+            """当日涨跌颜色：涨红跌绿"""
+            if isinstance(val, str) and val != '-':
+                try:
+                    v = float(val.replace('%', '').replace('+', ''))
+                    if v > 0: return 'color: #ef5350'
+                    elif v < 0: return 'color: #26a69a'
+                except: pass
+            return ''
+
         def color_cum(val):
             if val is None or pd.isna(val):
                 return ''
             if val > 0:
-                # 涨幅越大越红
-                intensity = min(abs(val) / 15, 1)
-                return f'color: #ef5350; font-weight: bold'
+                return 'color: #ef5350; font-weight: bold'
             else:
-                intensity = min(abs(val) / 15, 1)
-                return f'color: #26a69a; font-weight: bold'
+                return 'color: #26a69a; font-weight: bold'
 
-        def fmt_cum(val):
-            if val is None or pd.isna(val):
-                return '-'
-            return f"{val:+.2f}%"
+        def color_metric(val, low_good=True):
+            """技术指标颜色：根据超卖程度着色"""
+            if val == '-' or val is None:
+                return ''
+            try:
+                v = float(str(val).replace('%', '').replace('+', ''))
+            except:
+                return ''
+            if low_good:
+                if v < 10: return 'color: #D32F2F; font-weight: bold'  # 极度超卖
+                elif v < 20: return 'color: #FF5722'
+                elif v < 30: return 'color: #FF9800'
+                return ''
+            else:
+                # 量比越接近1越好（缩量），越低越好
+                if v < 0.5: return 'color: #D32F2F; font-weight: bold'
+                elif v < 0.7: return 'color: #FF5722'
+                elif v < 0.9: return 'color: #FF9800'
+                return ''
 
-        styled = df_table.style \
-            .applymap(color_score, subset=['得分']) \
-            .format({'当日收盘': '{:.2f}'})
+        def color_down_days(val):
+            """连跌天数：越多越极端"""
+            try:
+                v = int(val)
+                if v >= 6: return 'color: #D32F2F; font-weight: bold'
+                elif v >= 4: return 'color: #FF5722; font-weight: bold'
+                elif v >= 2: return 'color: #FF9800'
+                return ''
+            except: return ''
+
+        def color_dd(val):
+            """60日回撤：越大越好（跌得越多越有反弹空间）"""
+            if val == '-' or val is None: return ''
+            try:
+                v = float(str(val).replace('%', '').replace('+', ''))
+                if v <= -50: return 'color: #D32F2F; font-weight: bold'
+                elif v <= -35: return 'color: #FF5722; font-weight: bold'
+                elif v <= -25: return 'color: #FF9800'
+                return ''
+            except: return ''
+
+        def color_dev_ma60(val):
+            """MA60偏离：越负越超卖"""
+            if val == '-' or val is None: return ''
+            try:
+                v = float(str(val).replace('%', '').replace('+', ''))
+                if v <= -30: return 'color: #D32F2F; font-weight: bold'
+                elif v <= -20: return 'color: #FF5722; font-weight: bold'
+                elif v <= -10: return 'color: #FF9800'
+                return ''
+            except: return ''
+
+        # 应用样式
+        style_subsets = {
+            '得分': color_score,
+            '当日涨跌': color_pct_change,
+            'KDJ_K': color_metric,
+            'RSI14': color_metric,
+            '连跌天': color_down_days,
+            '60日回撤': color_dd,
+            'MA60偏离': color_dev_ma60,
+            '量比': lambda v: color_metric(v, low_good=False),
+        }
+
+        styled = df_table.style
+        for col, fn in style_subsets.items():
+            if col in df_table.columns:
+                styled = styled.map(fn, subset=[col])
 
         for td in track_dates:
-            styled = styled.applymap(color_cum, subset=[td])
-            styled = styled.format({td: fmt_cum})
+            styled = styled.map(color_cum, subset=[td])
+            styled = styled.format({td: lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-'})
 
         st.dataframe(styled, use_container_width=True, hide_index=True,
-                     height=min(800, 35 * len(table_data) + 40))
+                     height=min(800, 35 * len(table_data) + 40),
+                     column_config={
+                         '评分明细': st.column_config.TextColumn('评分明细', width='small'),
+                     })
 
-        st.caption(f"📊 跟踪日期: {', '.join(track_dates) if track_dates else '暂无后续交易日'} | 🔴红=累计涨 🟢绿=累计跌 | 数字为从入选日起的累计涨跌幅")
+        st.caption(f"📊 跟踪日期: {', '.join(track_dates) if track_dates else '暂无后续交易日'} | 🔴红=累计涨 🟢绿=累计跌 | KDJ_K/RSI14越红=超卖越严重 | 连跌天/回撤/偏离越红=越极端 | 评分明细: kdj/rsi/ma60_dev/down_days/dd_60/price_pct/macd/volume/boll/near_low")
 
         # 总体胜率曲线
         if track_dates and tracking:

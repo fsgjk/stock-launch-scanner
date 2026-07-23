@@ -74,6 +74,23 @@ def get_winner_stats():
     with get_db() as conn:
         return scanner.get_winner_stats(conn)
 
+@st.cache_data(ttl=3600)
+def get_stock_name(code):
+    with get_db() as conn:
+        cur = conn.execute("SELECT name FROM stock_info WHERE code=?", (code,))
+        row = cur.fetchone()
+        return row['name'] if row else ''
+
+@st.cache_data(ttl=3600)
+def get_stock_names(codes):
+    """批量获取股票名称"""
+    with get_db() as conn:
+        if not codes:
+            return {}
+        placeholders = ','.join(['?'] * len(codes))
+        cur = conn.execute(f"SELECT code, name FROM stock_info WHERE code IN ({placeholders})", codes)
+        return {r['code']: r['name'] for r in cur.fetchall()}
+
 # ========== 图表构建函数 ==========
 def build_thumbnail_chart(df, code, highlight_date=None):
     """构建缩略K线图（小尺寸，用于卡片）"""
@@ -347,6 +364,10 @@ if candidates:
     page_candidates = filtered[start_idx:end_idx]
 
     # 渲染卡片
+    # 批量获取名称
+    page_codes = [c['code'] for c in page_candidates]
+    names_map = get_stock_names(page_codes)
+
     for row_start in range(0, len(page_candidates), cols_per_row):
         row_candidates = page_candidates[row_start:row_start + cols_per_row]
         cols = st.columns(cols_per_row)
@@ -354,6 +375,7 @@ if candidates:
         for i, c in enumerate(row_candidates):
             with cols[i]:
                 code = c['code']
+                name = names_map.get(code, '')
                 score = c['score']
                 score_color = get_score_color(score)
 
@@ -374,8 +396,8 @@ if candidates:
 
                 st.markdown(f"""
                 <div style='border-left:3px solid {score_color}; padding-left:8px; margin-bottom:4px'>
-                <b style='font-size:1.1em'>{code}</b>
-                <span style='color:{score_color};font-weight:bold;float:right'>⭐{score}</span>
+                <b style='font-size:1.1em'>{code} {name}</b>
+                <span style='color:{score_color};font-weight:bold;float:right'>⭐{score}分</span>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -435,18 +457,37 @@ else:
     或者从历史扫描中选择已有结果查看。
     """)
 
-    # 显示大涨股统计
+    # 显示大涨股统计 + 评分说明
     winner_stats = get_winner_stats()
     if winner_stats:
         st.divider()
-        st.subheader("📊 大涨股起涨点特征（参考）")
-        cols = st.columns(6)
-        with cols[0]: st.metric("样本", f"{winner_stats['count']}只")
-        with cols[1]: st.metric("KDJ<30", f"{winner_stats['kdj_below_30_pct']:.0f}%")
-        with cols[2]: st.metric("RSI<35", f"{winner_stats['rsi_below_35_pct']:.0f}%")
-        with cols[3]: st.metric("破MA60", f"{winner_stats['dev_ma60_below_0_pct']:.0f}%")
-        with cols[4]: st.metric("缩量", f"{winner_stats['vol_below_1_pct']:.0f}%")
-        with cols[5]: st.metric("连跌≥3天", f"{winner_stats['down_days_ge3_pct']:.0f}%")
+        col_a, col_b = st.columns([1, 1])
+
+        with col_a:
+            st.subheader("📊 大涨股起涨点特征（参考）")
+            cols = st.columns(6)
+            with cols[0]: st.metric("样本", f"{winner_stats['count']}只")
+            with cols[1]: st.metric("KDJ<30", f"{winner_stats['kdj_below_30_pct']:.0f}%")
+            with cols[2]: st.metric("RSI<35", f"{winner_stats['rsi_below_35_pct']:.0f}%")
+            with cols[3]: st.metric("破MA60", f"{winner_stats['dev_ma60_below_0_pct']:.0f}%")
+            with cols[4]: st.metric("缩量", f"{winner_stats['vol_below_1_pct']:.0f}%")
+            with cols[5]: st.metric("连跌≥3天", f"{winner_stats['down_days_ge3_pct']:.0f}%")
+
+        with col_b:
+            st.subheader("📐 评分模型（满分30分）")
+            st.markdown("""
+            | 维度 | 满分 | 评分规则 |
+            |------|:---:|------|
+            | **KDJ** | 5 | K<15→5, <22→4, <30→3, <40→1 |
+            | **RSI** | 4 | <25→4, <30→3, <35→2, <42→1 |
+            | **MA60偏离** | 5 | <-25%→5, <-18%→4, <-12%→3, <-6%→2, <-3%→1 |
+            | **连跌天数** | 4 | ≥6天→4, ≥4→3, ≥3→2, ≥2→1 |
+            | **价格分位** | 4 | <5%→4, <15%→3, <25%→2, <40%→1 |
+            | **60日回撤** | 3 | <-40%→3, <-30%→2, <-20%→1 |
+            | **MACD** | 2 | 零轴下+绿柱→2, 零轴下→1 |
+            | **成交量** | 2 | 量比<0.6→2, <0.8→1 |
+            | **布林带** | 1 | 下轨附近→1 |
+            """)
 
 st.divider()
 st.caption(f"© A股起涨点扫描系统 V4 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

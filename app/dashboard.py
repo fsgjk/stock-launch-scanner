@@ -354,25 +354,15 @@ for c in candidates:
         '收盘': round(c['close'], 2),
         '涨跌': round(c['pct_change'], 2) if c.get('pct_change') is not None else None,
         '得分': int(c['score']),
-        '加入股票池天数': tk.get('days', 0) if tk else 0,
-        'KDJ_K': round(c['kdj_k'], 1) if c.get('kdj_k') is not None else None,
-        'RSI14': round(c['rsi14'], 1) if c.get('rsi14') is not None else None,
+        '持仓天数': tk.get('days', 0) if tk else 0,
+        '累计涨跌': round(latest_cum, 2) if latest_cum is not None else None,
         '连跌': int(c['down_days']) if c.get('down_days') is not None else 0,
         '60日回撤': round(c['dd_60'], 1) if c.get('dd_60') is not None else None,
         'MA60偏离': round(c['dev_ma60'], 1) if c.get('dev_ma60') is not None else None,
         '量比': round(c['volume_ratio'], 2) if c.get('volume_ratio') is not None else None,
     }
 
-    # 累计涨跌幅列
-    for td in track_dates:
-        if tk and td in tk['cum_pct']:
-            v = tk['cum_pct'][td]
-            row[f'累计_{td}'] = round(v, 2) if v is not None else None
-        else:
-            row[f'累计_{td}'] = None
-
     # 保存原始数据
-    row['_latest_cum'] = latest_cum
     row['_code'] = code
     row['_score_breakdown'] = c.get('score_breakdown', '{}')
 
@@ -381,11 +371,8 @@ for c in candidates:
 df_table = pd.DataFrame(table_data)
 
 # --- 构建 display DataFrame（去掉内部列） ---
-display_cols = ['代码', '名称', '收盘', '涨跌', '得分', '加入股票池天数',
-                '连跌', '60日回撤', 'MA60偏离', '量比']
-# 加上累计涨跌幅列
-cum_cols = [f'累计_{td}' for td in track_dates]
-display_cols += cum_cols
+display_cols = ['代码', '名称', '收盘', '涨跌', '得分', '持仓天数',
+                '累计涨跌', '连跌', '60日回撤', 'MA60偏离', '量比']
 
 df_display = df_table[display_cols].copy()
 
@@ -468,20 +455,17 @@ styled = styled.map(style_days, subset=['连跌'])
 styled = styled.map(style_dd, subset=['60日回撤'])
 styled = styled.map(style_dev, subset=['MA60偏离'])
 styled = styled.map(style_vol, subset=['量比'])
-
-for cc in cum_cols:
-    styled = styled.map(lambda v: style_pct(v, True), subset=[cc])
+styled = styled.map(style_pct, subset=['累计涨跌'])
 
 # 格式化
 fmt = {'收盘': '{:.2f}', '涨跌': '{:+.2f}%',
+       '累计涨跌': lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
        '60日回撤': '{:+.1f}%', 'MA60偏离': '{:+.1f}%', '量比': '{:.2f}'}
-for cc in cum_cols:
-    fmt[cc] = lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-'
 
 styled = styled.format(fmt)
 
 # 使用 data_editor 实现可点击选择
-st.caption(f"📊 跟踪日期: {', '.join(track_dates) if track_dates else '暂无后续'} | 🔴红涨 🟢绿跌 | 点击行查看K线")
+st.caption(f"📊 跟踪至最新交易日 | 🔴红涨 🟢绿跌 | 累计涨跌 = 从入选日至今的累计涨跌幅")
 
 # 使用 selectbox 做股票选择 + 下方展示K线
 # 按得分排序的选项

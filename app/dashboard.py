@@ -19,6 +19,15 @@ from utils.database import init_database, get_db
 from modules.stock_pool import pool_manager
 from modules.data_collector import collector
 from modules.launch_scanner import LaunchPointScanner
+from scheduler.job_scheduler import stock_scheduler
+
+# ========== 启动定时调度器 ==========
+if 'scheduler_started' not in st.session_state:
+    try:
+        stock_scheduler.start()
+        st.session_state.scheduler_started = True
+    except Exception as e:
+        pass  # 可能在Streamlit线程中启动，忽略冲突
 
 # ========== 页面配置 ==========
 st.set_page_config(page_title=PAGE_TITLE, page_icon=PAGE_ICON, layout="wide",
@@ -278,6 +287,18 @@ with col_top4:
     if st.session_state.selected_date:
         st.metric("选中扫描", f"{st.session_state.selected_date['total_candidates']}只候选")
         st.caption(f"数据日期: {st.session_state.selected_date.get('latest_trade_date', '?')}")
+
+# 调度器状态
+try:
+    sch_status = stock_scheduler.get_status()
+    if sch_status['running']:
+        next_scan = ""
+        for j in sch_status['jobs']:
+            if j['id'] == 'daily_scan':
+                next_scan = j['next_run']
+        st.caption(f"⏰ 下次自动扫描: {next_scan}" if next_scan else "⏰ 调度器运行中")
+except:
+    pass
 
 st.divider()
 

@@ -154,9 +154,10 @@ class LaunchPointScanner:
         return df
 
     def load_historical_data(self, conn, date_range):
-        """加载近60日历史数据"""
+        """加载近60日历史数据（含技术指标用于反转信号计算）"""
         df = pd.read_sql_query("""
-            SELECT code, trade_date, close, high, low, pct_change, volume
+            SELECT code, trade_date, close, open, high, low, pct_change, volume,
+                   kdj_k, kdj_d, macd_dif, macd_hist
             FROM stock_daily
             WHERE trade_date BETWEEN ? AND ?
             ORDER BY code, trade_date
@@ -164,7 +165,7 @@ class LaunchPointScanner:
         return df
 
     def calc_derived_features(self, df_hist):
-        """计算衍生指标"""
+        """计算衍生指标 + 反转确认信号"""
         grouped = df_hist.groupby('code')
 
         def calc(grp):
@@ -174,8 +175,14 @@ class LaunchPointScanner:
                 return pd.Series({
                     'down_days': np.nan, 'price_pct_20d': np.nan, 'dd_60': np.nan,
                     'vol_5d_avg': np.nan, 'near_low_10d': np.nan,
+                    'kdj_golden': 0, 'macd_divergence': 0,
+                    'is_bullish': 0, 'long_lower_shadow': 0,
+                    'vol_shrink_stop': 0,
                 })
-            last_close = grp.iloc[-1]['close']
+            last = grp.iloc[-1]
+            last_close = last['close']
+            
+            # --- 原有指标 ---
             down_days = 0
             for j in range(n - 1, max(0, n - 20), -1):
                 if grp.iloc[j]['pct_change'] is not None and grp.iloc[j]['pct_change'] < 0:
@@ -192,9 +199,71 @@ class LaunchPointScanner:
             vol_5d = grp.iloc[-5:]['volume'].mean() if n >= 5 else grp['volume'].mean()
             low10 = grp.iloc[-10:]['low'].min() if n >= 10 else grp.iloc[-1]['low']
             near_low = 1 if last_close <= low10 * 1.05 else 0
+
+            # --- 反转确认信号 ---
+            
+            # 1. KDJ金叉：今日K > 昨日K 且 今日K > 今日D
+            kdj_golden = 0
+            if n >= 2 and 'kdj_k' in grp.columns:
+                today_k = last.get('kdj_k')
+                today_d = last.get('kdj_d')
+                yesterday_k = grp.iloc[-2].get('kdj_k')
+                if today_k is not None and yesterday_k is not None and today_d is not None:
+                    if today_k > yesterday_k and today_k > today_d:
+                        kdj_golden = 1  # 金叉
+                    elif today_k > yesterday_k:
+                        kdj_golden = 0.5  # K线拐头
+            
+            # 2. MACD底背离：最近5日最低价创新低但MACD柱未创新低
+            macd_divergence = 0
+            if n >= 20 and 'macd_hist' in grp.columns:
+                recent_5 = grp.iloc[-5:]
+                prev_15 = grp.iloc[-20:-5]
+                if len(prev_15) > 0:
+                    recent_low = recent_5['low'].min()
+                    prev_low = prev_15['low'].min()
+                    recent_macd_min = recent_5['macd_hist'].min()
+                    prev_macd_min = prev_15['macd_hist'].min()
+                    if recent_low < prev_low and recent_macd_min > prev_macd_min:
+                        macd_divergence = 1  # 底背离
+            
+            # 3. 日内反转：收阳线
+            is_bullish = 0
+            if last.get('close') is not None and last.get('open') is not None:
+                if last['close'] > last['open']:
+                    is_bullish = 1  # 阳线
+            
+            # 4. 长下影线：下影线 > 实体2倍 或 (低点到收盘)/(振幅) > 0.6
+            long_lower_shadow = 0
+            if last.get('open') is not None and last.get('high') is not None and last.get('low') is not None:
+                body = abs(last['close'] - last['open'])
+                lower_shadow = min(last['close'], last['open']) - last['low']
+                upper_shadow = last['high'] - max(last['close'], last['open'])
+                total_range = last['high'] - last['low']
+                if total_range > 0:
+                    if lower_shadow > body * 2 and lower_shadow > 0:
+                        long_lower_shadow = 1
+                    elif lower_shadow / total_range > 0.6 and body / total_range < 0.3:
+                        long_lower_shadow = 0.5
+            
+            # 5. 缩量止跌：最近3天量逐步萎缩 + 今天跌幅收窄
+            vol_shrink_stop = 0
+            if n >= 3:
+                last3_vol = grp.iloc[-3:]['volume'].values
+                last3_pct = grp.iloc[-3:]['pct_change'].values
+                if len(last3_vol) == 3 and all(v > 0 for v in last3_vol):
+                    if last3_vol[0] > last3_vol[1] > last3_vol[2]:  # 缩量
+                        if abs(last3_pct[-1]) < abs(last3_pct[-2]):  # 跌幅收窄
+                            vol_shrink_stop = 1
+                        elif last3_pct[-1] > last3_pct[-2]:  # 跌幅减小
+                            vol_shrink_stop = 0.5
+
             return pd.Series({
                 'down_days': down_days, 'price_pct_20d': price_pct,
                 'dd_60': dd_60, 'vol_5d_avg': vol_5d, 'near_low_10d': near_low,
+                'kdj_golden': kdj_golden, 'macd_divergence': macd_divergence,
+                'is_bullish': is_bullish, 'long_lower_shadow': long_lower_shadow,
+                'vol_shrink_stop': vol_shrink_stop,
             })
 
         features = grouped.apply(calc).reset_index()
@@ -203,27 +272,43 @@ class LaunchPointScanner:
     # ==================== 步骤3: 精准筛选 ====================
 
     def apply_hard_filters(self, df):
-        """硬条件过滤，返回过滤后数据和统计"""
+        """硬条件过滤：超卖 + 反转确认信号，返回过滤后数据和统计"""
+        # 原有超卖条件（适当放宽，因为有反转确认兜底）
         conditions = [
-            ('KDJ超卖', df['kdj_k'] < 35),
-            ('RSI弱势', df['rsi14'] < 45),
+            ('KDJ超卖', df['kdj_k'] < 40),          # 放宽：从35→40
+            ('RSI弱势', df['rsi14'] < 50),           # 放宽：从45→50
             ('破MA60', df['dev_ma60'] < -3),
-            ('60日回撤', df['dd_60'] < -15),
-            ('缩量', df['volume_ratio'] < 1.2),
-            ('连跌', df['down_days'] >= 2),
-            ('当日未大涨', df['pct_change'] < 0.5),
-            ('布林下半区', df['boll_pos'] < 0.4),
+            ('60日回撤', df['dd_60'] < -10),         # 放宽：从-15→-10
+            ('缩量', df['volume_ratio'] < 1.5),      # 放宽：从1.2→1.5
+            ('连跌', df['down_days'] >= 1),          # 放宽：从2→1
+            ('当日未大涨', df['pct_change'] < 1.0),  # 放宽：从0.5→1.0
+            ('布林下半区', df['boll_pos'] < 0.5),    # 放宽：从0.4→0.5
         ]
+        
+        # 新增：反转确认信号（至少满足一个）
+        reversal_signals = (
+            (df['is_bullish'] >= 1) |                    # 收阳线
+            (df['long_lower_shadow'] >= 0.5) |            # 长下影线
+            (df['kdj_golden'] >= 0.5) |                   # KDJ拐头/金叉
+            (df['vol_shrink_stop'] >= 0.5) |              # 缩量止跌
+            (df['macd_divergence'] >= 1)                   # MACD底背离
+        )
+        
         filter_stats = {'total': len(df)}
         mask = np.ones(len(df), dtype=bool)
         for name, cond in conditions:
             mask = mask & cond
             filter_stats[name] = int(cond.sum())
+        
+        # 反转确认
+        mask = mask & reversal_signals
+        filter_stats['反转确认'] = int(reversal_signals.sum())
         filter_stats['passed'] = int(mask.sum())
+        
         return df[mask].copy(), filter_stats
 
     def calc_score_with_breakdown(self, row):
-        """计算综合评分并返回明细"""
+        """计算综合评分并返回明细（V2：加入反转确认信号权重）"""
         score = 0
         breakdown = {}
 
@@ -236,12 +321,11 @@ class LaunchPointScanner:
         else: pts, breakdown['kdj'] = 0, 0
         score += pts
 
-        # RSI (0-4)
+        # RSI (0-3, 降低权重)
         r = row['rsi14']
-        if r < 25: pts, breakdown['rsi'] = 4, 4
-        elif r < 30: pts, breakdown['rsi'] = 3, 3
-        elif r < 35: pts, breakdown['rsi'] = 2, 2
-        elif r < 42: pts, breakdown['rsi'] = 1, 1
+        if r < 25: pts, breakdown['rsi'] = 3, 3
+        elif r < 30: pts, breakdown['rsi'] = 2, 2
+        elif r < 35: pts, breakdown['rsi'] = 1, 1
         else: pts, breakdown['rsi'] = 0, 0
         score += pts
 
@@ -255,11 +339,10 @@ class LaunchPointScanner:
         else: pts, breakdown['ma60_dev'] = 0, 0
         score += pts
 
-        # 连跌 (0-4)
+        # 连跌 (0-3, 降低权重)
         dd = row['down_days']
-        if dd >= 6: pts, breakdown['down_days'] = 4, 4
-        elif dd >= 4: pts, breakdown['down_days'] = 3, 3
-        elif dd >= 3: pts, breakdown['down_days'] = 2, 2
+        if dd >= 6: pts, breakdown['down_days'] = 3, 3
+        elif dd >= 4: pts, breakdown['down_days'] = 2, 2
         elif dd >= 2: pts, breakdown['down_days'] = 1, 1
         else: pts, breakdown['down_days'] = 0, 0
         score += pts
@@ -272,38 +355,57 @@ class LaunchPointScanner:
         else: pts, breakdown['dd_60'] = 0, 0
         score += pts
 
-        # 价格分位数 (0-3)
+        # 价格分位数 (0-2, 降低权重)
         pp = row['price_pct_20d']
-        if pp < 5: pts, breakdown['price_pct'] = 3, 3
-        elif pp < 15: pts, breakdown['price_pct'] = 2, 2
-        elif pp < 25: pts, breakdown['price_pct'] = 1, 1
+        if pp < 5: pts, breakdown['price_pct'] = 2, 2
+        elif pp < 15: pts, breakdown['price_pct'] = 1, 1
         else: pts, breakdown['price_pct'] = 0, 0
         score += pts
 
-        # MACD (0-2)
-        if row['macd_dif'] < 0 and row['macd_hist'] < 0:
-            pts, breakdown['macd'] = 2, 2
-        elif row['macd_dif'] < 0:
-            pts, breakdown['macd'] = 1, 1
-        else:
-            pts, breakdown['macd'] = 0, 0
+        # MACD底背离 (0-3, 新增加权)
+        md = row.get('macd_divergence', 0)
+        if md >= 1: pts, breakdown['macd_div'] = 3, 3
+        elif row['macd_dif'] < 0 and row['macd_hist'] < 0:
+            pts, breakdown['macd_div'] = 1, 1
+        else: pts, breakdown['macd_div'] = 0, 0
         score += pts
 
-        # 成交量 (0-2)
+        # KDJ金叉 (0-3, 新增加权)
+        kg = row.get('kdj_golden', 0)
+        if kg >= 1: pts, breakdown['kdj_golden'] = 3, 3
+        elif kg >= 0.5: pts, breakdown['kdj_golden'] = 1, 1
+        else: pts, breakdown['kdj_golden'] = 0, 0
+        score += pts
+
+        # 日内反转阳线 (0-3, 新增加权)
+        ib = row.get('is_bullish', 0)
+        if ib >= 1: pts, breakdown['bullish'] = 3, 3
+        else: pts, breakdown['bullish'] = 0, 0
+        score += pts
+
+        # 长下影线 (0-2, 新增加权)
+        ls = row.get('long_lower_shadow', 0)
+        if ls >= 1: pts, breakdown['shadow'] = 2, 2
+        elif ls >= 0.5: pts, breakdown['shadow'] = 1, 1
+        else: pts, breakdown['shadow'] = 0, 0
+        score += pts
+
+        # 缩量止跌 (0-2, 新增加权)
+        vs = row.get('vol_shrink_stop', 0)
+        if vs >= 1: pts, breakdown['shrink_stop'] = 2, 2
+        elif vs >= 0.5: pts, breakdown['shrink_stop'] = 1, 1
+        else: pts, breakdown['shrink_stop'] = 0, 0
+        score += pts
+
+        # 成交量 (0-1)
         vr = row['volume_ratio']
-        if vr < 0.6: pts, breakdown['volume'] = 2, 2
-        elif vr < 0.8: pts, breakdown['volume'] = 1, 1
+        if vr < 0.6: pts, breakdown['volume'] = 1, 1
         else: pts, breakdown['volume'] = 0, 0
         score += pts
 
         # 布林 (0-1)
         if row['boll_pos'] < 0.1: pts, breakdown['boll'] = 1, 1
         else: pts, breakdown['boll'] = 0, 0
-        score += pts
-
-        # 额外 (0-1)
-        if row.get('near_low_10d', 0): pts, breakdown['near_low'] = 1, 1
-        else: pts, breakdown['near_low'] = 0, 0
         score += pts
 
         return score, breakdown

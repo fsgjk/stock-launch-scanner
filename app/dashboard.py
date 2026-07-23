@@ -354,7 +354,7 @@ for c in candidates:
         '收盘': round(c['close'], 2),
         '涨跌': round(c['pct_change'], 2) if c.get('pct_change') is not None else None,
         '得分': int(c['score']),
-        '持仓天数': tk.get('days', 0) if tk else 0,
+        '加入股票池天数': tk.get('days', 0) if tk else 0,
         'KDJ_K': round(c['kdj_k'], 1) if c.get('kdj_k') is not None else None,
         'RSI14': round(c['rsi14'], 1) if c.get('rsi14') is not None else None,
         '连跌': int(c['down_days']) if c.get('down_days') is not None else 0,
@@ -381,7 +381,7 @@ for c in candidates:
 df_table = pd.DataFrame(table_data)
 
 # --- 构建 display DataFrame（去掉内部列） ---
-display_cols = ['代码', '名称', '收盘', '涨跌', '得分', '持仓天数',
+display_cols = ['代码', '名称', '收盘', '涨跌', '得分', '加入股票池天数',
                 '连跌', '60日回撤', 'MA60偏离', '量比']
 # 加上累计涨跌幅列
 cum_cols = [f'累计_{td}' for td in track_dates]

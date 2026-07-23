@@ -311,7 +311,7 @@ class LaunchPointScanner:
     # ==================== 步骤4: 持久化 ====================
 
     def save_scan_results(self, conn, scan_date, df_top, stats, filter_stats, winner_count, latest_trade_date):
-        """保存扫描结果到数据库"""
+        """保存扫描结果到数据库（同一天重复扫描时覆盖旧记录）"""
         scan_time = datetime.now().strftime('%H:%M:%S')
         scan_params = json.dumps({
             'top_n': len(df_top), 'winner_threshold': 20,
@@ -321,6 +321,13 @@ class LaunchPointScanner:
                 'pct_change_max': 0.5, 'boll_pos_max': 0.4,
             }
         })
+
+        # 删除同一天的旧扫描记录
+        old_ids = [r[0] for r in conn.execute(
+            "SELECT id FROM launch_scan_results WHERE scan_date=?", (scan_date,)).fetchall()]
+        for old_id in old_ids:
+            conn.execute("DELETE FROM launch_scan_candidates WHERE scan_id=?", (old_id,))
+            conn.execute("DELETE FROM launch_scan_results WHERE id=?", (old_id,))
 
         cur = conn.execute("""
             INSERT INTO launch_scan_results (scan_date, scan_time, total_scanned, total_candidates,

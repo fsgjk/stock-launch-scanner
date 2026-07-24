@@ -462,9 +462,9 @@ for c in candidates:
         '得分': int(c['score']),
         '持仓天数': tk.get('days', 0) if tk else 0,
         cum_label: round(latest_cum, 2) if latest_cum is not None else None,
-        max_label: round(tk.get('max_cum', 0), 2) if tk and tk.get('max_cum') is not None else None,
+        max_label: round(tk.get('max_cum', 0), 2) if tk and tk.get('max_cum') is not None and tk.get('max_date') else None,
         '最高日期': tk.get('max_date', '') if tk and tk.get('max_date') else '-',
-        '最高天数': tk.get('max_days', 0) if tk else 0,  # 连续上涨天数
+        '最高天数': tk.get('max_days', 0) if tk and tk.get('max_date') else 0,  # 连续上涨天数
         '连跌': int(c['down_days']) if c.get('down_days') is not None else 0,
         '60日回撤': round(c['dd_60'], 1) if c.get('dd_60') is not None else None,
         'MA60偏离': round(c['dev_ma60'], 1) if c.get('dev_ma60') is not None else None,

@@ -157,18 +157,21 @@ def get_tracking_pivoted(codes, entry_date):
                 cum_pct[d] = (sdf.loc[d] - entry_price) / entry_price * 100
             elif d > entry_date:
                 cum_pct[d] = None
-        # 计算累计最高涨幅及其日期
+        # 计算累计最高涨幅及其日期和所需天数
         valid_items = [(d, v) for d, v in cum_pct.items() if v is not None]
         if valid_items:
             max_item = max(valid_items, key=lambda x: x[1])
             max_cum, max_date = max_item[1], max_item[0]
+            # 达到最高涨幅所需天数（从入选日次日起算）
+            max_days = len([d for d in all_dates if entry_date < d <= max_date and d in sdf.index])
         else:
-            max_cum, max_date = 0, ''
+            max_cum, max_date, max_days = 0, '', 0
         result[code] = {
             'entry_price': entry_price,
             'cum_pct': cum_pct,
             'max_cum': max_cum,
             'max_date': max_date,
+            'max_days': max_days,
             'days': len([d for d in all_dates if d > entry_date and d in sdf.index]),
         }
     return result, all_dates
@@ -445,6 +448,7 @@ for c in candidates:
         cum_label: round(latest_cum, 2) if latest_cum is not None else None,
         max_label: round(tk.get('max_cum', 0), 2) if tk and tk.get('max_cum') is not None else None,
         '最高日期': tk.get('max_date', '') if tk and tk.get('max_date') else '-',
+        '最高天数': tk.get('max_days', 0) if tk else 0,
         '连跌': int(c['down_days']) if c.get('down_days') is not None else 0,
         '60日回撤': round(c['dd_60'], 1) if c.get('dd_60') is not None else None,
         'MA60偏离': round(c['dev_ma60'], 1) if c.get('dev_ma60') is not None else None,
@@ -461,7 +465,7 @@ df_table = pd.DataFrame(table_data)
 
 # --- 构建 display DataFrame（去掉内部列） ---
 display_cols = ['代码', '名称', '收盘', '涨跌', '得分', '持仓天数',
-                cum_label, max_label, '最高日期', '连跌', '60日回撤', 'MA60偏离', '量比']
+                cum_label, max_label, '最高日期', '最高天数', '连跌', '60日回撤', 'MA60偏离', '量比']
 
 df_display = df_table[display_cols].copy()
 

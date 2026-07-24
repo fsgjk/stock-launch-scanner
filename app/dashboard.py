@@ -408,6 +408,11 @@ st.divider()
 # ==================== 主表格 + K线联动 ====================
 st.subheader("📋 股票列表（点击行查看K线图）")
 
+# 动态列名：带上最新跟踪日期
+last_track_date = track_dates[-1] if track_dates else ''
+cum_label = f'累计涨跌({last_track_date})' if last_track_date else '累计涨跌'
+max_label = f'最高累计涨幅({last_track_date})' if last_track_date else '最高累计涨幅'
+
 # 构建表格数据
 table_data = []
 for c in candidates:
@@ -431,8 +436,8 @@ for c in candidates:
         '涨跌': round(c['pct_change'], 2) if c.get('pct_change') is not None else None,
         '得分': int(c['score']),
         '持仓天数': tk.get('days', 0) if tk else 0,
-        '累计涨跌': round(latest_cum, 2) if latest_cum is not None else None,
-        '最高涨幅': round(tk.get('max_cum', 0), 2) if tk else None,
+        cum_label: round(latest_cum, 2) if latest_cum is not None else None,
+        max_label: round(tk.get('max_cum', 0), 2) if tk else None,
         '连跌': int(c['down_days']) if c.get('down_days') is not None else 0,
         '60日回撤': round(c['dd_60'], 1) if c.get('dd_60') is not None else None,
         'MA60偏离': round(c['dev_ma60'], 1) if c.get('dev_ma60') is not None else None,
@@ -449,7 +454,7 @@ df_table = pd.DataFrame(table_data)
 
 # --- 构建 display DataFrame（去掉内部列） ---
 display_cols = ['代码', '名称', '收盘', '涨跌', '得分', '持仓天数',
-                '累计涨跌', '最高涨幅', '连跌', '60日回撤', 'MA60偏离', '量比']
+                cum_label, max_label, '连跌', '60日回撤', 'MA60偏离', '量比']
 
 df_display = df_table[display_cols].copy()
 
@@ -532,13 +537,13 @@ styled = styled.map(style_days, subset=['连跌'])
 styled = styled.map(style_dd, subset=['60日回撤'])
 styled = styled.map(style_dev, subset=['MA60偏离'])
 styled = styled.map(style_vol, subset=['量比'])
-styled = styled.map(style_pct, subset=['累计涨跌'])
-styled = styled.map(style_pct, subset=['最高涨幅'])
+styled = styled.map(style_pct, subset=[cum_label])
+styled = styled.map(style_pct, subset=[max_label])
 
 # 格式化
 fmt = {'收盘': '{:.2f}', '涨跌': '{:+.2f}%',
-       '累计涨跌': lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
-       '最高涨幅': lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
+       cum_label: lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
+       max_label: lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
        '60日回撤': '{:+.1f}%', 'MA60偏离': '{:+.1f}%', '量比': '{:.2f}'}
 
 styled = styled.format(fmt)

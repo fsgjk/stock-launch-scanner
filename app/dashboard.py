@@ -108,7 +108,8 @@ def get_daily_data(code, days=250):
 def get_scan_dates():
     with get_db() as conn:
         cur = conn.execute("""
-            SELECT id, scan_date, scan_time, total_candidates, latest_trade_date
+            SELECT id, scan_date, scan_time, total_candidates, latest_trade_date, 
+                   COALESCE(model_version, 'V1') as model_version
             FROM launch_scan_results ORDER BY scan_date DESC LIMIT 120
         """)
         return [dict(r) for r in cur.fetchall()]
@@ -200,24 +201,42 @@ with st.sidebar:
         pass
 
     st.divider()
-    st.caption("📅 扫描日期（点击查看）")
 
     scan_dates = get_scan_dates()
     if not scan_dates:
-        st.info("暂无扫描记录，请点击「手动扫描」")
+        st.info("暂无扫描记录")
     else:
+        # 按模型版本分组
+        from itertools import groupby
+        models = {}
         for s in scan_dates:
-            sid = s['id']
-            is_sel = st.session_state.selected_scan_id == sid
-            label = f"📅 {s['scan_date']}"
-            cap = f"{s['total_candidates']}只候选"
+            mv = s.get('model_version', 'V1')
+            if mv not in models:
+                models[mv] = []
+            models[mv].append(s)
 
-            if st.button(f"{'🔵 ' if is_sel else ''}{label}  — {cap}",
-                         key=f"d_{sid}", use_container_width=True,
-                         type="primary" if is_sel else "secondary"):
-                st.session_state.selected_scan_id = sid
-                st.session_state.expanded_stock = None
-                st.rerun()
+        # 按模型版本排序（V2 > V1）
+        model_order = sorted(models.keys(), reverse=True)
+
+        for mv in model_order:
+            dates_in_model = models[mv]
+            # 模型版本作为一级菜单（expander）
+            badge_color = {"V1": "🟠", "V2": "🟢"}
+            badge = badge_color.get(mv, "⚪")
+            
+            with st.expander(f"{badge} 模型 {mv}（{len(dates_in_model)}天）", expanded=(mv == model_order[0])):
+                for s in dates_in_model:
+                    sid = s['id']
+                    is_sel = st.session_state.selected_scan_id == sid
+                    label = f"📅 {s['scan_date']}"
+                    cap = f"{s['total_candidates']}只"
+
+                    if st.button(f"{'🔵 ' if is_sel else ''}{label}  — {cap}",
+                                 key=f"d_{sid}", use_container_width=True,
+                                 type="primary" if is_sel else "secondary"):
+                        st.session_state.selected_scan_id = sid
+                        st.session_state.expanded_stock = None
+                        st.rerun()
 
     st.divider()
     st.caption(f"数据源: AKShare/新浪 | V7")

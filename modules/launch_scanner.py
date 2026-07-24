@@ -412,31 +412,34 @@ class LaunchPointScanner:
 
     # ==================== 步骤4: 持久化 ====================
 
-    def save_scan_results(self, conn, scan_date, df_top, stats, filter_stats, winner_count, latest_trade_date):
-        """保存扫描结果到数据库（同一天重复扫描时覆盖旧记录）"""
+    def save_scan_results(self, conn, scan_date, df_top, stats, filter_stats, winner_count, latest_trade_date, model_version='V2'):
+        """保存扫描结果到数据库（同一天同一模型重复扫描时覆盖旧记录）"""
         scan_time = datetime.now().strftime('%H:%M:%S')
         scan_params = json.dumps({
             'top_n': len(df_top), 'winner_threshold': 20,
+            'model_version': model_version,
             'hard_filters': {
-                'kdj_max': 35, 'rsi_max': 45, 'ma60_dev_max': -3,
-                'dd60_max': -15, 'vol_ratio_max': 1.2, 'down_days_min': 2,
-                'pct_change_max': 0.5, 'boll_pos_max': 0.4,
+                'kdj_max': 40, 'rsi_max': 50, 'ma60_dev_max': -3,
+                'dd60_max': -10, 'vol_ratio_max': 1.5, 'down_days_min': 1,
+                'pct_change_max': 1.0, 'boll_pos_max': 0.5,
+                'reversal_required': True,
             }
         })
 
-        # 删除同一天的旧扫描记录
+        # 删除同一天同一模型的旧扫描记录
         old_ids = [r[0] for r in conn.execute(
-            "SELECT id FROM launch_scan_results WHERE scan_date=?", (scan_date,)).fetchall()]
+            "SELECT id FROM launch_scan_results WHERE scan_date=? AND model_version=?",
+            (scan_date, model_version)).fetchall()]
         for old_id in old_ids:
             conn.execute("DELETE FROM launch_scan_candidates WHERE scan_id=?", (old_id,))
             conn.execute("DELETE FROM launch_scan_results WHERE id=?", (old_id,))
 
         cur = conn.execute("""
             INSERT INTO launch_scan_results (scan_date, scan_time, total_scanned, total_candidates,
-                hard_filter_passed, winner_sample_count, latest_trade_date, scan_params)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                hard_filter_passed, winner_sample_count, latest_trade_date, scan_params, model_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (scan_date, scan_time, filter_stats['total'], len(df_top),
-              filter_stats['passed'], winner_count, latest_trade_date, scan_params))
+              filter_stats['passed'], winner_count, latest_trade_date, scan_params, model_version))
         scan_id = cur.lastrowid
 
         # 批量插入候选
@@ -613,7 +616,7 @@ class LaunchPointScanner:
             scan_id = self.save_scan_results(
                 conn, scan_date, df_top,
                 self.compute_winner_statistics(df_w) if not df_w.empty else {},
-                filter_stats, winner_count, latest_date)
+                filter_stats, winner_count, latest_date, model_version='V2')
 
             if progress_callback:
                 progress_callback('done', 100, f'扫描完成! 候选{len(df_top)}只')
@@ -698,7 +701,7 @@ class LaunchPointScanner:
             scan_id = self.save_scan_results(
                 conn, scan_date_str, df_top,
                 self.compute_winner_statistics(df_w) if not df_w.empty else {},
-                filter_stats, winner_count, target_date)
+                filter_stats, winner_count, target_date, model_version='V2')
 
             return {
                 'scan_id': scan_id,

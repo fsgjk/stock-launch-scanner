@@ -412,7 +412,7 @@ class LaunchPointScanner:
 
     # ==================== 步骤4: 持久化 ====================
 
-    def save_scan_results(self, conn, scan_date, df_top, stats, filter_stats, winner_count, latest_trade_date, model_version='V2'):
+    def save_scan_results(self, conn, scan_date, df_top, stats, filter_stats, winner_count, latest_trade_date, model_version='超卖反转模型'):
         """保存扫描结果到数据库（同一天同一模型重复扫描时覆盖旧记录）"""
         scan_time = datetime.now().strftime('%H:%M:%S')
         scan_params = json.dumps({
@@ -616,7 +616,7 @@ class LaunchPointScanner:
             scan_id = self.save_scan_results(
                 conn, scan_date, df_top,
                 self.compute_winner_statistics(df_w) if not df_w.empty else {},
-                filter_stats, winner_count, latest_date, model_version='V2')
+                filter_stats, winner_count, latest_date, model_version='超卖反转模型')
 
             if progress_callback:
                 progress_callback('done', 100, f'扫描完成! 候选{len(df_top)}只')
@@ -701,7 +701,7 @@ class LaunchPointScanner:
             scan_id = self.save_scan_results(
                 conn, scan_date_str, df_top,
                 self.compute_winner_statistics(df_w) if not df_w.empty else {},
-                filter_stats, winner_count, target_date, model_version='V2')
+                filter_stats, winner_count, target_date, model_version='超卖反转模型')
 
             return {
                 'scan_id': scan_id,

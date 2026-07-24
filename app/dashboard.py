@@ -285,7 +285,8 @@ tracking, all_track_dates = get_tracking_pivoted(codes, scan_date)
 track_dates = [d for d in all_track_dates if d > scan_date]
 
 # ==================== 顶部概览 ====================
-st.markdown(f"## 📅 {scan_info.get('scan_date', '')} 起涨点候选池")
+model_ver = scan_info.get('model_version', 'V1')
+st.markdown(f"## 📅 {scan_info.get('scan_date', '')} 起涨点候选池  — 模型 {model_ver}")
 
 # 概览指标
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -295,7 +296,7 @@ with col1:
 
 with col2:
     avg_score = np.mean([c['score'] for c in candidates])
-    st.metric("平均得分", f"{avg_score:.1f}/30")
+    st.metric("平均得分", f"{avg_score:.1f}")
 
 with col3:
     if track_dates and tracking:
@@ -345,6 +346,88 @@ with col5:
         st.metric("跟踪天数", f"{len(track_dates)}天")
     else:
         st.metric("跟踪天数", "0天")
+
+st.divider()
+
+# ==================== 模型条件面板 ====================
+# 根据模型版本展示对应的条件
+model_configs = {
+    'V1': {
+        'name': '纯超卖模型',
+        'desc': '基于超卖程度评分，不考虑反转信号',
+        'filters': [
+            ('KDJ_K', '< 35', '超卖区'),
+            ('RSI14', '< 45', '弱势区'),
+            ('MA60偏离', '< -3%', '跌破60日线'),
+            ('60日回撤', '< -15%', '深度回调'),
+            ('量比', '< 1.2', '缩量'),
+            ('连跌天数', '≥ 2天', '持续下跌'),
+            ('当日涨幅', '< 0.5%', '未启动'),
+            ('布林位置', '< 0.4', '下半区'),
+        ],
+        'scoring': [
+            ('KDJ', '0-5分', 'K值越低分越高'),
+            ('RSI', '0-4分', 'RSI越低分越高'),
+            ('MA60偏离', '0-5分', '偏离越大分越高'),
+            ('连跌天数', '0-4分', '连跌越多分越高'),
+            ('60日回撤', '0-3分', '回撤越大分越高'),
+            ('价格分位', '0-3分', '越低分越高'),
+            ('MACD', '0-2分', 'DIF/柱为负加分'),
+            ('量能', '0-2分', '缩量加分'),
+            ('布林', '0-1分', '近下轨加分'),
+            ('近低', '0-1分', '近10日低点加分'),
+        ],
+        'total': 30,
+    },
+    'V2': {
+        'name': '超卖+反转确认模型',
+        'desc': '在超卖基础上要求至少一个反转确认信号（阳线/下影线/KDJ金叉/缩量止跌/MACD底背离）',
+        'filters': [
+            ('KDJ_K', '< 40', '超卖区(放宽)'),
+            ('RSI14', '< 50', '弱势区(放宽)'),
+            ('MA60偏离', '< -3%', '跌破60日线'),
+            ('60日回撤', '< -10%', '回调(放宽)'),
+            ('量比', '< 1.5', '非放量(放宽)'),
+            ('连跌天数', '≥ 1天', '至少跌1天'),
+            ('当日涨幅', '< 1.0%', '未大涨(放宽)'),
+            ('布林位置', '< 0.5', '下半区(放宽)'),
+            ('反转确认', '≥ 1个', '阳线/下影线/KDJ金叉/缩量止跌/MACD底背离'),
+        ],
+        'scoring': [
+            ('KDJ', '0-5分', 'K值越低分越高'),
+            ('RSI', '0-3分', 'RSI越低分越高'),
+            ('MA60偏离', '0-5分', '偏离越大分越高'),
+            ('连跌天数', '0-3分', '连跌越多分越高'),
+            ('60日回撤', '0-3分', '回撤越大分越高'),
+            ('价格分位', '0-2分', '越低分越高'),
+            ('MACD底背离', '0-3分', '底背离加分'),
+            ('KDJ金叉', '0-3分', '金叉/拐头加分'),
+            ('阳线', '0-3分', '收阳加分'),
+            ('长下影线', '0-2分', '下影线加分'),
+            ('缩量止跌', '0-2分', '缩量止跌加分'),
+            ('量能', '0-1分', '缩量加分'),
+            ('布林', '0-1分', '近下轨加分'),
+        ],
+        'total': 36,
+    },
+}
+
+config = model_configs.get(model_ver, model_configs['V1'])
+
+with st.expander(f"⚙️ 模型条件 — {config['name']}", expanded=False):
+    st.caption(f"📝 {config['desc']}")
+    
+    col_f, col_s = st.columns([1, 1])
+    
+    with col_f:
+        st.markdown("**🔍 硬条件过滤**")
+        filter_df = pd.DataFrame(config['filters'], columns=['指标', '条件', '说明'])
+        st.dataframe(filter_df, use_container_width=True, hide_index=True)
+    
+    with col_s:
+        st.markdown(f"**⭐ 评分维度（满分 {config['total']} 分）**")
+        score_df = pd.DataFrame(config['scoring'], columns=['维度', '分值', '说明'])
+        st.dataframe(score_df, use_container_width=True, hide_index=True)
 
 st.divider()
 

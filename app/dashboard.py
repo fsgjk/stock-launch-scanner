@@ -417,7 +417,7 @@ st.subheader("📋 股票列表（点击行查看K线图）")
 last_track_date = track_dates[-1] if track_dates else ''
 cum_label = f'累计涨跌({last_track_date})' if last_track_date else '累计涨跌'
 # 最高累计涨幅列名——每只股票日期不同，用通用名
-max_label = '最高累计涨幅(日期)'
+max_label = '最高累计涨幅'
 
 # 构建表格数据
 table_data = []

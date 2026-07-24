@@ -157,13 +157,18 @@ def get_tracking_pivoted(codes, entry_date):
                 cum_pct[d] = (sdf.loc[d] - entry_price) / entry_price * 100
             elif d > entry_date:
                 cum_pct[d] = None
-        # 计算累计最高涨幅（从入选日至今中间达到的最高点）
-        valid_cum = [v for v in cum_pct.values() if v is not None]
-        max_cum = max(valid_cum) if valid_cum else 0
+        # 计算累计最高涨幅及其日期
+        valid_items = [(d, v) for d, v in cum_pct.items() if v is not None]
+        if valid_items:
+            max_item = max(valid_items, key=lambda x: x[1])
+            max_cum, max_date = max_item[1], max_item[0]
+        else:
+            max_cum, max_date = 0, ''
         result[code] = {
             'entry_price': entry_price,
             'cum_pct': cum_pct,
             'max_cum': max_cum,
+            'max_date': max_date,
             'days': len([d for d in all_dates if d > entry_date and d in sdf.index]),
         }
     return result, all_dates
@@ -408,10 +413,11 @@ st.divider()
 # ==================== 主表格 + K线联动 ====================
 st.subheader("📋 股票列表（点击行查看K线图）")
 
-# 动态列名：带上最新跟踪日期
+# 动态列名：累计涨跌带上最新跟踪日期
 last_track_date = track_dates[-1] if track_dates else ''
 cum_label = f'累计涨跌({last_track_date})' if last_track_date else '累计涨跌'
-max_label = f'最高累计涨幅({last_track_date})' if last_track_date else '最高累计涨幅'
+# 最高累计涨幅列名——每只股票日期不同，用通用名
+max_label = '最高累计涨幅(日期)'
 
 # 构建表格数据
 table_data = []
@@ -437,7 +443,7 @@ for c in candidates:
         '得分': int(c['score']),
         '持仓天数': tk.get('days', 0) if tk else 0,
         cum_label: round(latest_cum, 2) if latest_cum is not None else None,
-        max_label: round(tk.get('max_cum', 0), 2) if tk else None,
+        max_label: f"{round(tk.get('max_cum', 0), 2):+.2f}%({tk.get('max_date', '')})" if tk and tk.get('max_cum') is not None else '-',
         '连跌': int(c['down_days']) if c.get('down_days') is not None else 0,
         '60日回撤': round(c['dd_60'], 1) if c.get('dd_60') is not None else None,
         'MA60偏离': round(c['dev_ma60'], 1) if c.get('dev_ma60') is not None else None,
@@ -538,12 +544,23 @@ styled = styled.map(style_dd, subset=['60日回撤'])
 styled = styled.map(style_dev, subset=['MA60偏离'])
 styled = styled.map(style_vol, subset=['量比'])
 styled = styled.map(style_pct, subset=[cum_label])
-styled = styled.map(style_pct, subset=[max_label])
+
+# 最高累计涨幅颜色：解析字符串中的数字部分
+def style_max_cum(val):
+    if val == '-' or val is None: return ''
+    try:
+        s = str(val)
+        pct_str = s.split('%')[0].replace('+', '')
+        v = float(pct_str)
+        if v > 0: return 'color: #ef5350; font-weight: bold'
+        elif v < 0: return 'color: #26a69a; font-weight: bold'
+    except: pass
+    return ''
+styled = styled.map(style_max_cum, subset=[max_label])
 
 # 格式化
 fmt = {'收盘': '{:.2f}', '涨跌': '{:+.2f}%',
        cum_label: lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
-       max_label: lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
        '60日回撤': '{:+.1f}%', 'MA60偏离': '{:+.1f}%', '量比': '{:.2f}'}
 
 styled = styled.format(fmt)

@@ -164,7 +164,7 @@ def get_tracking_pivoted(codes, entry_date):
             'entry_price': entry_price,
             'cum_pct': cum_pct,
             'max_cum': max_cum,
-            'days': len([d for d in all_dates if d >= entry_date and d in sdf.index]),
+            'days': len([d for d in all_dates if d > entry_date and d in sdf.index]),
         }
     return result, all_dates
 

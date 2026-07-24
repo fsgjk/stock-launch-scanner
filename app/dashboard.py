@@ -224,11 +224,8 @@ with st.sidebar:
 
         for mv in model_order:
             dates_in_model = models[mv]
-            # 模型版本作为一级菜单（expander）
-            badge_color = {"V1": "🟠", "V2": "🟢"}
-            badge = badge_color.get(mv, "⚪")
             
-            with st.expander(f"{badge} 模型 {mv}（{len(dates_in_model)}天）", expanded=(mv == model_order[0])):
+            with st.expander(f"📁 {mv}（{len(dates_in_model)}天）", expanded=(mv == model_order[0])):
                 for s in dates_in_model:
                     sid = s['id']
                     is_sel = st.session_state.selected_scan_id == sid
@@ -356,7 +353,7 @@ st.divider()
 # ==================== 模型条件面板 ====================
 # 各模型的条件配置
 model_configs = {
-    '超卖反转模型': {
+    '001 超卖反转模型': {
         'name': '超卖反转模型',
         'desc': '超卖（KDJ/RSI/MA60偏离/回撤/缩量/连跌）+ 反转确认信号（阳线/下影线/KDJ金叉/缩量止跌/MACD底背离）',
         'filters': [
@@ -389,7 +386,7 @@ model_configs = {
     },
 }
 
-config = model_configs.get(model_ver, model_configs['超卖反转模型'])
+config = model_configs.get(model_ver, model_configs['001 超卖反转模型'])
 
 with st.expander(f"⚙️ 模型条件 — {config['name']}", expanded=False):
     st.caption(f"📝 {config['desc']}")

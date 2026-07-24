@@ -443,8 +443,8 @@ for c in candidates:
         '得分': int(c['score']),
         '持仓天数': tk.get('days', 0) if tk else 0,
         cum_label: round(latest_cum, 2) if latest_cum is not None else None,
-        max_label: f"{round(tk.get('max_cum', 0), 2):+.2f}%({tk.get('max_date', '')})" if tk and tk.get('max_cum') is not None else '-',
-        '_max_cum_sort': round(tk.get('max_cum', 0), 2) if tk else 0,  # 排序用
+        max_label: round(tk.get('max_cum', 0), 2) if tk and tk.get('max_cum') is not None else None,
+        '最高日期': tk.get('max_date', '') if tk and tk.get('max_date') else '-',
         '连跌': int(c['down_days']) if c.get('down_days') is not None else 0,
         '60日回撤': round(c['dd_60'], 1) if c.get('dd_60') is not None else None,
         'MA60偏离': round(c['dev_ma60'], 1) if c.get('dev_ma60') is not None else None,
@@ -461,11 +461,9 @@ df_table = pd.DataFrame(table_data)
 
 # --- 构建 display DataFrame（去掉内部列） ---
 display_cols = ['代码', '名称', '收盘', '涨跌', '得分', '持仓天数',
-                cum_label, max_label, '连跌', '60日回撤', 'MA60偏离', '量比']
+                cum_label, max_label, '最高日期', '连跌', '60日回撤', 'MA60偏离', '量比']
 
 df_display = df_table[display_cols].copy()
-# 附加排序列，用于 dataframe 排序
-df_display['_max_sort'] = df_table['_max_cum_sort']
 
 # --- 颜色函数 ---
 def style_score(val):
@@ -547,23 +545,12 @@ styled = styled.map(style_dd, subset=['60日回撤'])
 styled = styled.map(style_dev, subset=['MA60偏离'])
 styled = styled.map(style_vol, subset=['量比'])
 styled = styled.map(style_pct, subset=[cum_label])
-
-# 最高累计涨幅颜色：解析字符串中的数字
-def style_max_cum(val):
-    if val == '-' or val is None: return ''
-    try:
-        s = str(val)
-        pct_str = s.split('%')[0].replace('+', '')
-        v = float(pct_str)
-        if v > 0: return 'color: #ef5350; font-weight: bold'
-        elif v < 0: return 'color: #26a69a; font-weight: bold'
-    except: pass
-    return ''
-styled = styled.map(style_max_cum, subset=[max_label])
+styled = styled.map(style_pct, subset=[max_label])
 
 # 格式化
 fmt = {'收盘': '{:.2f}', '涨跌': '{:+.2f}%',
        cum_label: lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
+       max_label: lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
        '60日回撤': '{:+.1f}%', 'MA60偏离': '{:+.1f}%', '量比': '{:.2f}'}
 
 styled = styled.format(fmt)
@@ -581,10 +568,7 @@ view_codes = [c['code'] for c in candidates]
 # 表格区域
 st.dataframe(styled, use_container_width=True, hide_index=True,
              height=min(600, 35 * len(table_data) + 40),
-             column_config={
-                 '得分': st.column_config.NumberColumn('得分', width='small'),
-                 '_max_sort': None,  # 隐藏排序辅助列
-             })
+             column_config={'得分': st.column_config.NumberColumn('得分', width='small')})
 
 # ==================== K线图查看器 ====================
 st.divider()

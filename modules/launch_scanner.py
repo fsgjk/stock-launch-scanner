@@ -139,16 +139,19 @@ class LaunchPointScanner:
     # ==================== 步骤2: 全市场扫描 ====================
 
     def load_today_data(self, conn, latest_date):
-        """加载最新交易日全市场数据"""
+        """加载最新交易日全市场数据（排除ST/*ST）"""
         df = pd.read_sql_query("""
-            SELECT code, trade_date, close, open, high, low, pct_change, amplitude,
-                   kdj_k, kdj_d, kdj_j,
-                   macd_dif, macd_dea, macd_hist,
-                   ma5, ma10, ma20, ma60, ma120, ma250,
-                   rsi6, rsi14, rsi24,
-                   volume_ratio, turnover_rate, volume,
-                   boll_upper, boll_mid, boll_lower
-            FROM stock_daily WHERE trade_date = ?
+            SELECT d.code, d.trade_date, d.close, d.open, d.high, d.low, d.pct_change, d.amplitude,
+                   d.kdj_k, d.kdj_d, d.kdj_j,
+                   d.macd_dif, d.macd_dea, d.macd_hist,
+                   d.ma5, d.ma10, d.ma20, d.ma60, d.ma120, d.ma250,
+                   d.rsi6, d.rsi14, d.rsi24,
+                   d.volume_ratio, d.turnover_rate, d.volume,
+                   d.boll_upper, d.boll_mid, d.boll_lower
+            FROM stock_daily d
+            LEFT JOIN stock_info i ON d.code = i.code
+            WHERE d.trade_date = ?
+              AND (i.name NOT LIKE '%ST%' OR i.name IS NULL)
         """, conn, params=(latest_date,))
         df = df[df['code'].str.match(r'^(00|30|60|68)')].copy()
         return df

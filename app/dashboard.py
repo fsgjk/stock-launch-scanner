@@ -157,9 +157,13 @@ def get_tracking_pivoted(codes, entry_date):
                 cum_pct[d] = (sdf.loc[d] - entry_price) / entry_price * 100
             elif d > entry_date:
                 cum_pct[d] = None
+        # 计算累计最高涨幅（从入选日至今中间达到的最高点）
+        valid_cum = [v for v in cum_pct.values() if v is not None]
+        max_cum = max(valid_cum) if valid_cum else 0
         result[code] = {
             'entry_price': entry_price,
             'cum_pct': cum_pct,
+            'max_cum': max_cum,
             'days': len([d for d in all_dates if d >= entry_date and d in sdf.index]),
         }
     return result, all_dates
@@ -458,6 +462,7 @@ for c in candidates:
         '得分': int(c['score']),
         '持仓天数': tk.get('days', 0) if tk else 0,
         '累计涨跌': round(latest_cum, 2) if latest_cum is not None else None,
+        '最高涨幅': round(tk.get('max_cum', 0), 2) if tk else None,
         '连跌': int(c['down_days']) if c.get('down_days') is not None else 0,
         '60日回撤': round(c['dd_60'], 1) if c.get('dd_60') is not None else None,
         'MA60偏离': round(c['dev_ma60'], 1) if c.get('dev_ma60') is not None else None,
@@ -474,7 +479,7 @@ df_table = pd.DataFrame(table_data)
 
 # --- 构建 display DataFrame（去掉内部列） ---
 display_cols = ['代码', '名称', '收盘', '涨跌', '得分', '持仓天数',
-                '累计涨跌', '连跌', '60日回撤', 'MA60偏离', '量比']
+                '累计涨跌', '最高涨幅', '连跌', '60日回撤', 'MA60偏离', '量比']
 
 df_display = df_table[display_cols].copy()
 
@@ -558,10 +563,12 @@ styled = styled.map(style_dd, subset=['60日回撤'])
 styled = styled.map(style_dev, subset=['MA60偏离'])
 styled = styled.map(style_vol, subset=['量比'])
 styled = styled.map(style_pct, subset=['累计涨跌'])
+styled = styled.map(style_pct, subset=['最高涨幅'])
 
 # 格式化
 fmt = {'收盘': '{:.2f}', '涨跌': '{:+.2f}%',
        '累计涨跌': lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
+       '最高涨幅': lambda v: f"{v:+.2f}%" if v is not None and not (isinstance(v, float) and pd.isna(v)) else '-',
        '60日回撤': '{:+.1f}%', 'MA60偏离': '{:+.1f}%', '量比': '{:.2f}'}
 
 styled = styled.format(fmt)
